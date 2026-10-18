@@ -5,6 +5,20 @@
 An extension manager for [WezTerm](https://wezterm.org): install, update and remove
 small tools and Lua snippets from a central index — without hand-editing your config.
 
+## Install
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/wezext-community/wezext/main/install.ps1 | iex"
+```
+
+The script resolves the latest release, downloads the zip, verifies its sha256,
+unpacks it to `%LOCALAPPDATA%\wezextin` and adds that directory to your user `PATH`.
+Knobs (env vars, since `iex` can't take arguments): `WEZEXT_VERSION`, `WEZEXT_DIR`,
+`WEZEXT_NO_PATH=1`.
+
+Or grab `wezext-*-x86_64-pc-windows-msvc.zip` from
+[Releases](https://github.com/wezext-community/wezext/releases) and unzip it anywhere.
+
 ```
 wezext list                      # what's in the index, and what's installed
 wezext install wezfont          # download the prebuilt binary and install it

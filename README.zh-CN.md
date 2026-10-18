@@ -5,6 +5,21 @@
 [WezTerm](https://wezterm.org) 的扩展管理器：从一个集中索引安装、更新、卸载小工具和
 Lua 片段 —— 不用手改主配置。
 
+## 一键安装
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/wezext-community/wezext/main/install.ps1 | iex"
+```
+
+脚本会：查最新 release → 下载 zip → 校验 sha256 → 解压到 `%LOCALAPPDATA%\wezextin`
+→ 把该目录加进用户 `PATH`。
+
+可用环境变量调节（因为 `iex` 传不了参数）：`WEZEXT_VERSION`、`WEZEXT_DIR`、
+`WEZEXT_NO_PATH=1`。
+
+也可以直接从 [Releases](https://github.com/wezext-community/wezext/releases) 下载
+`wezext-*-x86_64-pc-windows-msvc.zip` 解压到任意位置。
+
 ```
 wezext list                      # 索引里有什么 / 装了没
 wezext install wezfont          # 下载预编译二进制并安装
