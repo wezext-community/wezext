@@ -23,10 +23,12 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod tui;
+
 // ---------------- 数据结构 ----------------
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct Index {
+pub(crate) struct Index {
     #[serde(default)]
     schema: u32,
     #[serde(default)]
@@ -34,7 +36,7 @@ struct Index {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct Extension {
+pub(crate) struct Extension {
     name: String,
     #[serde(default)]
     display: String,
@@ -89,13 +91,13 @@ fn default_mods() -> String {
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
-struct State {
+pub(crate) struct State {
     #[serde(default)]
     extensions: BTreeMap<String, Installed>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct Installed {
+pub(crate) struct Installed {
     version: String,
     /// "binary" | "source" | "lua"
     kind: String,
@@ -117,7 +119,7 @@ fn local_appdata() -> PathBuf {
         .unwrap_or_else(|_| home().join("AppData/Local"))
 }
 
-fn root_dir() -> PathBuf {
+pub(crate) fn root_dir() -> PathBuf {
     local_appdata().join("wezext")
 }
 fn bin_dir() -> PathBuf {
@@ -135,24 +137,24 @@ fn cache_dir() -> PathBuf {
 fn state_path() -> PathBuf {
     root_dir().join("state.json")
 }
-fn ext_lua_path() -> PathBuf {
+pub(crate) fn ext_lua_path() -> PathBuf {
     home().join(".wezterm-ext.lua")
 }
-fn main_config_path() -> PathBuf {
+pub(crate) fn main_config_path() -> PathBuf {
     home().join(".wezterm.lua")
 }
 
-const INCLUDE_HINT: &str = "pcall(dofile, wezterm.home_dir .. '/.wezterm-ext.lua')";
+pub(crate) const INCLUDE_HINT: &str = "pcall(dofile, wezterm.home_dir .. '/.wezterm-ext.lua')";
 
 // ---------------- 索引 ----------------
 
-fn index_source() -> String {
+pub(crate) fn index_source() -> String {
     std::env::var("WEZEXT_INDEX").unwrap_or_else(|_| {
         "https://raw.githubusercontent.com/wezext-community/wezext-index/main/index.json".to_string()
     })
 }
 
-fn load_index(refresh: bool) -> Result<(Index, String), String> {
+pub(crate) fn load_index(refresh: bool) -> Result<(Index, String), String> {
     let src = index_source();
 
     // 本地目录
@@ -264,14 +266,14 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 
 // ---------------- 状态 ----------------
 
-fn load_state() -> State {
+pub(crate) fn load_state() -> State {
     fs::read_to_string(state_path())
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default()
 }
 
-fn save_state(state: &State) -> Result<(), String> {
+pub(crate) fn save_state(state: &State) -> Result<(), String> {
     fs::create_dir_all(root_dir()).map_err(|e| format!("创建 {} 失败: {e}", root_dir().display()))?;
     let text = serde_json::to_string_pretty(state).map_err(|e| format!("序列化失败: {e}"))?;
     atomic_write(&state_path(), &text)
@@ -291,7 +293,7 @@ fn lua_quote(s: &str) -> String {
     format!("[[{}]]", s)
 }
 
-fn regenerate_lua(state: &State, index: &Index) -> Result<PathBuf, String> {
+pub(crate) fn regenerate_lua(state: &State, index: &Index) -> Result<PathBuf, String> {
     let mut body = String::new();
     body.push_str("-- 由 wezext 自动生成，请勿手改（改完 wezext 会覆盖）\n");
     body.push_str("-- 主配置末尾应有：");
@@ -464,7 +466,7 @@ fn install_lua(ext: &Extension, version: &str) -> Result<Installed, String> {
 }
 
 /// 没显式指定安装方式时：已装的按它原来的方式；没装的优先 binary，其次 lua
-fn mode_for(ext: &Extension, installed: Option<&Installed>) -> InstallMode {
+pub(crate) fn mode_for(ext: &Extension, installed: Option<&Installed>) -> InstallMode {
     if let Some(i) = installed {
         return match i.kind.as_str() {
             "lua" => InstallMode::Lua,
@@ -481,7 +483,7 @@ fn mode_for(ext: &Extension, installed: Option<&Installed>) -> InstallMode {
     }
 }
 
-fn do_install(
+pub(crate) fn do_install(
     name: &str,
     mode: Option<InstallMode>,
     index: &Index,
@@ -508,7 +510,7 @@ fn do_install(
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum InstallMode {
+pub(crate) enum InstallMode {
     Binary,
     Source,
     Lua,
@@ -594,66 +596,75 @@ fn cmd_remove(names: &[String], index: &Index, state: &mut State) -> Result<(), 
     Ok(())
 }
 
-fn cmd_doctor(index: &Index, state: &State) -> i32 {
+/// 生成 doctor 的检查结果（CLI 打印，TUI 渲染）
+pub(crate) fn doctor_lines(index: &Index, state: &State) -> (Vec<String>, usize) {
+    let mut lines: Vec<String> = Vec::new();
     let mut problems = 0;
-    println!("wezext 目录 : {}", root_dir().display());
-    println!("索引来源    : {}", index_source());
-    println!("扩展配置    : {}", ext_lua_path().display());
-    println!();
+
+    lines.push(format!("wezext 目录 : {}", root_dir().display()));
+    lines.push(format!("索引来源    : {}", index_source()));
+    lines.push(format!("扩展配置    : {}", ext_lua_path().display()));
+    lines.push(String::new());
 
     for (name, inst) in &state.extensions {
         if inst.kind == "lua" {
             let p = PathBuf::from(&inst.path);
             if p.is_file() {
-                println!("✓ {name} {} (lua)", inst.version);
+                lines.push(format!("[ok] {name} {} (lua)", inst.version));
             } else {
-                println!("✗ {name} lua 文件不见了: {}", inst.path);
+                lines.push(format!("[!!] {name} lua 文件不见了: {}", inst.path));
                 problems += 1;
             }
             continue;
         }
         let p = PathBuf::from(&inst.exe);
         if p.is_file() {
-            println!("✓ {name} {} ({})", inst.version, inst.kind);
+            lines.push(format!("[ok] {name} {} ({})", inst.version, inst.kind));
         } else {
-            println!("✗ {name} 可执行文件不见了: {}", inst.exe);
+            lines.push(format!("[!!] {name} 可执行文件不见了: {}", inst.exe));
             problems += 1;
         }
         match index.extensions.get(name) {
             Some(ext) if ext.version != inst.version => {
-                println!("  ↑ 索引里是 {}，可以 wezext update {name}", ext.version);
+                lines.push(format!("     ↑ 索引里是 {}，可以更新", ext.version));
             }
             Some(_) => {}
             None => {
-                println!("  ? 索引里已经没有这个扩展了");
+                lines.push("     ? 索引里已经没有这个扩展了".to_string());
                 problems += 1;
             }
         }
     }
 
     if state.extensions.is_empty() {
-        println!("（还没装任何扩展）");
+        lines.push("（还没装任何扩展）".to_string());
     }
 
-    println!();
-    // 检查主配置有没有接入
+    lines.push(String::new());
     match fs::read_to_string(main_config_path()) {
         Ok(cfg) => {
             if cfg.contains(".wezterm-ext.lua") {
-                println!("✓ 主配置已接入 .wezterm-ext.lua");
+                lines.push("[ok] 主配置已接入 .wezterm-ext.lua".to_string());
             } else {
-                println!("✗ 主配置里没找到 .wezterm-ext.lua 的 dofile，扩展不会生效");
-                println!("  在 ~/.wezterm.lua 的 return config 之前加一行：");
-                println!("    {INCLUDE_HINT}");
+                lines.push("[!!] 主配置里没找到 .wezterm-ext.lua 的 dofile，扩展不会生效".to_string());
+                lines.push(format!("     在 ~/.wezterm.lua 的 return config 之前加一行：{INCLUDE_HINT}"));
                 problems += 1;
             }
         }
         Err(e) => {
-            println!("✗ 读不到 {}: {e}", main_config_path().display());
+            lines.push(format!("[!!] 读不到 {}: {e}", main_config_path().display()));
             problems += 1;
         }
     }
 
+    (lines, problems)
+}
+
+fn cmd_doctor(index: &Index, state: &State) -> i32 {
+    let (lines, problems) = doctor_lines(index, state);
+    for line in lines {
+        println!("{line}");
+    }
     problems as i32
 }
 
@@ -662,6 +673,11 @@ fn main() {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(|s| s.as_str()).unwrap_or("list");
+
+    // 不带参数 / 显式 `tui`：进交互界面
+    if args.is_empty() || cmd == "tui" {
+        std::process::exit(tui::run());
+    }
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
 
     let build_mode = rest.iter().any(|a| a == "--build");
@@ -820,7 +836,7 @@ wezext —— wezterm 扩展管理器
 // ---------------- self-update ----------------
 
 const SELF_REPO: &str = "wezext-community/wezext";
-const SELF_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const SELF_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn parse_version(v: &str) -> Vec<u32> {
     v.trim_start_matches('v')

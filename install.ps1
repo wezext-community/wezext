@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  wezext 安装脚本（两种模式）
 #
 #  用法（推荐，一行装好）：
@@ -31,6 +31,14 @@ $dir = if ($env:WEZEXT_DIR) { $env:WEZEXT_DIR } else { Join-Path $env:LOCALAPPDA
 $skipPath = $env:WEZEXT_NO_PATH -in @('1', 'true', 'yes', 'on')
 $fromSource = $Source -or ($env:WEZEXT_FROM_SOURCE -in @('1', 'true', 'yes', 'on'))
 $requested = $env:WEZEXT_VERSION
+
+# 交互式菜单：只有在真终端里、且没通过环境变量指定时才出现
+$wantMenu = ($env:WEZEXT_MENU -in @('1', 'true', 'yes', 'on')) -or
+    ($env:WEZEXT_YES -notin @('1', 'true', 'yes', 'on') -and
+     $env:WEZEXT_FROM_SOURCE -notin @('1', 'true', 'yes', 'on') -and
+     -not $Source -and
+     -not [Console]::IsInputRedirected -and
+     $Host.Name -eq 'ConsoleHost')
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "  [ok] $msg" -ForegroundColor Green }
@@ -83,6 +91,41 @@ function Resolve-LatestVersion {
             } else { throw }
         }
     }
+}
+
+# ================= 交互式菜单 =================
+if ($wantMenu) {
+    Clear-Host
+    Write-Host '========================================' -ForegroundColor Cyan
+    Write-Host ' wezext 安装程序' -ForegroundColor Cyan
+    Write-Host ' wezterm 扩展管理器' -ForegroundColor DarkGray
+    Write-Host '========================================' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host ' 请选择安装方式：' -ForegroundColor White
+    Write-Host '   1) 二进制安装        下载官方 release，约 250 KB（推荐）'
+    Write-Host '   2) 本地工具链编译    需要 git + cargo'
+    Write-Host '   3) 退出'
+    Write-Host ''
+    $choice = Read-Host ' 输入编号 [1]'
+    if ([string]::IsNullOrWhiteSpace($choice)) { $choice = '1' }
+    switch ($choice.Trim()) {
+        '1' { $fromSource = $false }
+        '2' { $fromSource = $true }
+        '3' { Write-Host ' 已取消。' -ForegroundColor DarkGray; return }
+        default { Write-Warn2 "无效选择 '$choice'，按二进制安装继续"; $fromSource = $false }
+    }
+
+    Write-Host ''
+    Write-Host " 安装目录（回车用默认）：$dir" -ForegroundColor White
+    $picked = Read-Host ' 目录'
+    if (-not [string]::IsNullOrWhiteSpace($picked)) { $dir = $picked.Trim() }
+
+    Write-Host ''
+    $pathAnswer = Read-Host ' 把安装目录加入用户 PATH？[Y/n]'
+    $skipPath = $pathAnswer -match '^(n|no)$'
+
+    Write-Host ''
+    Write-Host ' 开始安装…' -ForegroundColor Cyan
 }
 
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -193,6 +236,23 @@ try {
     Write-Host "  wezext 安装完成：$exe" -ForegroundColor Green
 }
 Write-Host ''
+if ($wantMenu) {
+    $ans = Read-Host ' 顺手装上推荐扩展（wezfont / wezlauncher / opacity-toggle）？[Y/n]'
+    if ($ans -notmatch '^(n|no)$') {
+        Write-Step '安装推荐扩展'
+        & $exe install wezfont wezlauncher opacity-toggle
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok '扩展已安装（新开 wezterm 窗口即生效）'
+        } else {
+            Write-Warn2 '有失败项，可以稍后手动跑 wezext install'
+        }
+        Write-Host ''
+        Write-Step '自检'
+        & $exe doctor
+        Write-Host ''
+    }
+}
+
 Write-Host '  下一步：' -ForegroundColor Cyan
 Write-Host '    wezext list                  # 看看索引里有哪些扩展'
 Write-Host '    wezext install wezfont       # 装字体选择器'

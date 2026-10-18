@@ -1,9 +1,11 @@
 [package]
 name = "wezext"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 
 [dependencies]
+crossterm = "0.29.0"
+ratatui = "0.30.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
