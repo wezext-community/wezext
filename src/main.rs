@@ -742,21 +742,37 @@ fn main() {
             }
         },
         "update" | "up" => {
-            let targets: Vec<String> = if names.is_empty() {
-                state
-                    .extensions
-                    .keys()
-                    .filter(|n| {
-                        index
-                            .as_ref()
-                            .map(|i| i.extensions.contains_key(*n))
-                            .unwrap_or(false)
-                    })
-                    .cloned()
-                    .collect()
+            let idx = index.as_ref().unwrap();
+            let force = rest.iter().any(|a| a == "--force");
+
+            // 候选：指定了名字就用名字，否则是所有已装的
+            let candidates: Vec<String> = if names.is_empty() {
+                state.extensions.keys().cloned().collect()
             } else {
                 names.clone()
             };
+
+            // 只保留"索引里有"且（版本不同 或 --force）的
+            let mut targets: Vec<String> = Vec::new();
+            for name in &candidates {
+                let Some(ext) = idx.extensions.get(name) else {
+                    println!("{name}: no longer in the index, skipping");
+                    continue;
+                };
+                match state.extensions.get(name) {
+                    Some(inst) if !force && inst.version == ext.version => {
+                        println!("{name}: already up to date ({})", inst.version);
+                    }
+                    Some(inst) => {
+                        println!("{name}: {} -> {}", inst.version, ext.version);
+                        targets.push(name.clone());
+                    }
+                    None => {
+                        println!("{name}: not installed, skipping (use `wezext install {name}`)");
+                    }
+                }
+            }
+
             let mode = if build_mode {
                 Some(InstallMode::Source)
             } else {
@@ -766,7 +782,7 @@ fn main() {
                 println!("nothing to update");
                 0
             } else {
-                match cmd_install(&targets, mode, index.as_ref().unwrap(), &mut state) {
+                match cmd_install(&targets, mode, idx, &mut state) {
                     Ok(()) => 0,
                     Err(e) => {
                         eprintln!("update failed: {e}");
@@ -825,7 +841,8 @@ commands:
   install <name>...       install extensions (binary by default)
                             --build  build from source (needs git + cargo)
                             --lua    install a Lua-snippet extension
-  update [name]...        update everything installed (or the given names)
+  update [name]...        update installed extensions (skips ones already
+                          at the index version; add --force to reinstall)
   build <name>...         build from source and install
   remove <name>...        uninstall
   doctor                  self-check: files, versions, config wiring
