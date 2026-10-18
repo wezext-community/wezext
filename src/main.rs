@@ -610,6 +610,8 @@ fn cmd_doctor(index: &Index, state: &State) -> i32 {
 }
 
 fn main() {
+    cleanup_old_binaries();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(|s| s.as_str()).unwrap_or("list");
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
@@ -717,6 +719,7 @@ fn main() {
             }
         }
         "doctor" | "dr" => cmd_doctor(index.as_ref().unwrap(), &state),
+        "self-update" | "upgrade" => cmd_self_update(rest.iter().any(|a| a == "--force")),
         "index" => match load_index(true) {
             Ok((i, src)) => {
                 println!("索引来源: {src}");
@@ -755,8 +758,139 @@ wezext —— wezterm 扩展管理器
   build <name>...        从源码构建并安装
   remove <name>...       卸载
   doctor                 自检：文件、版本、主配置是否已接入
+  self-update [--force]  把 wezext 自己更新到最新 release
   index                  刷新索引缓存
 
 环境变量:
   WEZEXT_INDEX   覆盖索引来源：本地目录 / 本地文件 / URL
 ";
+
+// ---------------- self-update ----------------
+
+const SELF_REPO: &str = "wezext-community/wezext";
+const SELF_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn parse_version(v: &str) -> Vec<u32> {
+    v.trim_start_matches('v')
+        .split('.')
+        .filter_map(|p| p.parse::<u32>().ok())
+        .collect()
+}
+
+/// 启动时清理上次升级留下的 .old（当时它被占用，删不掉）
+fn cleanup_old_binaries() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let old = exe.with_extension("exe.old");
+    let _ = fs::remove_file(old);
+    let old2 = PathBuf::from(format!("{}.old", exe.display()));
+    let _ = fs::remove_file(old2);
+}
+
+fn cmd_self_update(force: bool) -> i32 {
+    println!("当前版本: {SELF_VERSION}");
+
+    let api = format!("https://api.github.com/repos/{SELF_REPO}/releases/latest");
+    let tmp = cache_dir().join("self-release.json");
+    if let Err(e) = fs::create_dir_all(cache_dir()) {
+        eprintln!("创建缓存目录失败: {e}");
+        return 1;
+    }
+
+    let mut ok = false;
+    for attempt in 1..=4 {
+        match curl_to(&api, &tmp) {
+            Ok(()) => {
+                ok = true;
+                break;
+            }
+            Err(e) => eprintln!("  第 {attempt} 次获取 release 信息失败: {e}"),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    if !ok {
+        eprintln!("获取最新版本失败（网络？）");
+        return 1;
+    }
+
+    let text = match fs::read_to_string(&tmp) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("读取 release 信息失败: {e}");
+            return 1;
+        }
+    };
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("解析 release 信息失败: {e}");
+            return 1;
+        }
+    };
+    let tag = json["tag_name"].as_str().unwrap_or_default().to_string();
+    let latest = tag.trim_start_matches('v').to_string();
+    println!("最新版本: {latest}（{tag}）");
+
+    if !force && parse_version(&latest) <= parse_version(SELF_VERSION) {
+        println!("已是最新，无需更新（想强制重装加 --force）");
+        return 0;
+    }
+
+    // 找匹配的资产
+    let wanted = format!("wezext-v{latest}-x86_64-pc-windows-msvc.zip");
+    let mut url = None;
+    if let Some(assets) = json["assets"].as_array() {
+        for a in assets {
+            if a["name"].as_str() == Some(wanted.as_str()) {
+                url = a["browser_download_url"].as_str().map(|s| s.to_string());
+                break;
+            }
+        }
+    }
+    let Some(url) = url else {
+        eprintln!("这个 release 里没有 {wanted}，跳过");
+        return 1;
+    };
+
+    let zip = cache_dir().join(&wanted);
+    let unpack = cache_dir().join("self-new");
+    let _ = fs::remove_dir_all(&unpack);
+    if let Err(e) = curl_to(&url, &zip) {
+        eprintln!("下载失败: {e}");
+        return 1;
+    }
+    if let Err(e) = extract_zip(&zip, &unpack) {
+        eprintln!("解压失败: {e}");
+        return 1;
+    }
+    let Some(new_exe) = find_file(&unpack, "wezext.exe") else {
+        eprintln!("压缩包里没有 wezext.exe");
+        return 1;
+    };
+
+    let Ok(current) = std::env::current_exe() else {
+        eprintln!("拿不到当前 exe 路径");
+        return 1;
+    };
+    let backup = PathBuf::from(format!("{}.old", current.display()));
+
+    // 正在运行的 exe 不能覆盖，但可以改名
+    if let Err(e) = fs::rename(&current, &backup) {
+        eprintln!("无法重命名当前 exe（{e}），是不是装在只读目录？");
+        return 1;
+    }
+    if let Err(e) = fs::copy(&new_exe, &current) {
+        eprintln!("复制新版本失败（{e}），正在回滚");
+        let _ = fs::rename(&backup, &current);
+        return 1;
+    }
+    let _ = fs::remove_file(&zip);
+    let _ = fs::remove_dir_all(&unpack);
+
+    println!(
+        "已更新到 {latest}。重新运行 wezext 生效（旧版本留在 {}，下次启动自动清理）",
+        backup.display()
+    );
+    0
+}
