@@ -17,6 +17,23 @@ powershell -c "irm https://raw.githubusercontent.com/wezext-community/wezext/mai
 可用环境变量调节（因为 `iex` 传不了参数）：`WEZEXT_VERSION`、`WEZEXT_DIR`、
 `WEZEXT_NO_PATH=1`。
 
+### 两种安装方式
+
+| 方式 | 做法 | 需要 |
+| --- | --- | --- |
+| 二进制（默认） | 下载 release 里的 zip，校验 sha256 后解压 | 无 |
+| 本地工具链编译 | `git clone` + `cargo build --release`，装编译产物 | `git` + `cargo` |
+
+```powershell
+# 源码编译（用环境变量，因为 `iex` 传不了参数）
+$env:WEZEXT_FROM_SOURCE=1; irm https://raw.githubusercontent.com/wezext-community/wezext/main/install.ps1 | iex
+
+# 或者直接跑文件
+pwsh -File install.ps1 -Source
+```
+
+脚本输出只用 `Write-Host` + ASCII 符号，**不依赖任何第三方项目 / 字体 / 提示符框架**。
+
 也可以直接从 [Releases](https://github.com/wezext-community/wezext/releases) 下载
 `wezext-*-x86_64-pc-windows-msvc.zip` 解压到任意位置。
 

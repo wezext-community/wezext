@@ -16,6 +16,24 @@ unpacks it to `%LOCALAPPDATA%\wezextin` and adds that directory to your user `P
 Knobs (env vars, since `iex` can't take arguments): `WEZEXT_VERSION`, `WEZEXT_DIR`,
 `WEZEXT_NO_PATH=1`.
 
+### Two install modes
+
+| Mode | How | Needs |
+| --- | --- | --- |
+| Binary (default) | download the release zip, verify sha256, unzip | nothing |
+| From source | `git clone` + `cargo build --release`, then install the built exe | `git` + `cargo` |
+
+```powershell
+# from source (env var, because `iex` can't take arguments)
+$env:WEZEXT_FROM_SOURCE=1; irm https://raw.githubusercontent.com/wezext-community/wezext/main/install.ps1 | iex
+
+# or, running the file directly
+pwsh -File install.ps1 -Source
+```
+
+The script prints plain ASCII status lines only — it does not depend on any third-party
+project, font or prompt framework.
+
 Or grab `wezext-*-x86_64-pc-windows-msvc.zip` from
 [Releases](https://github.com/wezext-community/wezext/releases) and unzip it anywhere.
 
