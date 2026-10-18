@@ -1,12 +1,13 @@
 // ============================================================
-//  wezext 的交互界面（ratatui）
+//  wezext interactive UI (ratatui)
 //
-//  两个页面（Tab 切换）：
-//    扩展 —— 列出索引里的扩展和安装状态，直接安装/更新/卸载/源码构建
-//    自检 —— doctor 的检查结果（文件在不在、主配置是否接入）
+//  Two pages (Tab to switch):
+//    Extensions - indexed extensions and their install state; install / update /
+//                 remove / build from source right here
+//    Doctor     - output of the doctor checks (files present, config wired up)
 //
-//  按键：↑↓/jk 选择 · Enter 安装或更新 · b 源码构建 · d 卸载
-//        r 刷新索引 · u 更新 wezext 自己 · Tab 切页 · q/Esc 退出
+//  Keys: up/down/jk select - Enter install or update - b build from source
+//        d remove - r refresh index - u self-update - Tab switch page - q/Esc quit
 // ============================================================
 use std::path::PathBuf;
 use std::process::Command;
@@ -30,7 +31,7 @@ enum Page {
     Doctor,
 }
 
-/// 一条操作的结果，几秒后自动消失
+/// Result of an action, shown for a few seconds
 struct Flash {
     text: String,
     ok: bool,
@@ -55,14 +56,14 @@ impl App {
         let (index, index_src) = match load_index(false) {
             Ok(v) => v,
             Err(e) => {
-                // 索引拉不下来也让它进界面，至少能看到错误
-                eprintln!("加载索引失败: {e}");
+                // still show the UI when the index fails, so the error is visible
+                eprintln!("failed to load index: {e}");
                 (
                     crate::Index {
                         schema: 1,
                         extensions: Default::default(),
                     },
-                    format!("加载失败：{e}"),
+                    format!("load failed: {e}"),
                 )
             }
         };
@@ -114,7 +115,7 @@ impl App {
         });
     }
 
-    /// 安装 / 更新选中项（自动选方式：已装沿用原类型，未装优先 binary）
+    /// Install or update the selection (mode is picked automatically)
     fn install_selected(&mut self, force_build: bool) {
         let Some((name, _)) = self.selected().map(|(n, e)| (n.clone(), e.version.clone())) else {
             return;
@@ -125,8 +126,8 @@ impl App {
             None
         };
         self.busy = Some(format!(
-            "{} {name}…",
-            if force_build { "从源码构建" } else { "安装" }
+            "{} {name}...",
+            if force_build { "building" } else { "installing" }
         ));
         let result = do_install(&name, mode, &self.index, &mut self.state);
         self.busy = None;
@@ -140,10 +141,10 @@ impl App {
                     .get(&name)
                     .map(|i| i.version.clone())
                     .unwrap_or_default();
-                self.flash_ok(format!("已安装 {name} {done}（已重新生成 .wezterm-ext.lua）"));
+                self.flash_ok(format!("installed {name} {done} (regenerated .wezterm-ext.lua)"));
                 self.refresh_doctor();
             }
-            Err(e) => self.flash_err(format!("安装失败：{e}")),
+            Err(e) => self.flash_err(format!("install failed: {e}")),
         }
     }
 
@@ -152,7 +153,7 @@ impl App {
             return;
         };
         let Some(inst) = self.state.extensions.remove(&name) else {
-            self.flash_err(format!("{name} 没装"));
+            self.flash_err(format!("{name} is not installed"));
             return;
         };
         let p = PathBuf::from(&inst.path);
@@ -163,43 +164,43 @@ impl App {
         }
         let _ = save_state(&self.state);
         let _ = regenerate_lua(&self.state, &self.index);
-        self.flash_ok(format!("已卸载 {name} {}", inst.version));
+        self.flash_ok(format!("removed {name} {}", inst.version));
         self.refresh_doctor();
     }
 
     fn refresh_index(&mut self) {
-        self.busy = Some("刷新索引…".into());
+        self.busy = Some("refreshing index...".into());
         match load_index(true) {
             Ok((index, src)) => {
                 self.index = index;
                 self.index_src = src;
-                self.flash_ok(format!("索引已刷新：{} 个扩展", self.index.extensions.len()));
+                self.flash_ok(format!("index refreshed: {} extensions", self.index.extensions.len()));
                 if self.sel >= self.index.extensions.len() {
                     self.sel = self.index.extensions.len().saturating_sub(1);
                 }
                 self.state = load_state();
                 self.refresh_doctor();
             }
-            Err(e) => self.flash_err(format!("刷新索引失败：{e}")),
+            Err(e) => self.flash_err(format!("index refresh failed: {e}")),
         }
         self.busy = None;
     }
 
     fn self_update(&mut self) {
-        self.busy = Some("更新 wezext 自身…".into());
+        self.busy = Some("updating wezext...".into());
         let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("wezext.exe"));
         let out = Command::new(exe).arg("self-update").output();
         self.busy = None;
         match out {
             Ok(o) if o.status.success() => {
                 let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                self.flash_ok(text.lines().last().unwrap_or("自更新完成").to_string());
+                self.flash_ok(text.lines().last().unwrap_or("self-update finished").to_string());
             }
             Ok(o) => {
                 let text = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                self.flash_err(format!("自更新失败：{text}"));
+                self.flash_err(format!("self-update failed: {text}"));
             }
-            Err(e) => self.flash_err(format!("无法启动 self-update：{e}")),
+            Err(e) => self.flash_err(format!("cannot run self-update: {e}")),
         }
     }
 
@@ -216,7 +217,7 @@ pub fn run() -> i32 {
     match result {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("TUI 出错: {e}");
+            eprintln!("TUI error: {e}");
             1
         }
     }
@@ -278,13 +279,13 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> std::io::Result<
 fn status_badge(app: &App, name: &str) -> Span<'static> {
     match (app.installed_of(name), app.index.extensions.get(name)) {
         (Some(inst), Some(ext)) if inst.version == ext.version => {
-            Span::styled(" 已装 ", Style::default().fg(Color::Black).bg(Color::LightGreen))
+            Span::styled(" installed ", Style::default().fg(Color::Black).bg(Color::LightGreen))
         }
         (Some(_), Some(_)) => {
-            Span::styled(" 可更新 ", Style::default().fg(Color::Black).bg(Color::Yellow))
+            Span::styled(" update ", Style::default().fg(Color::Black).bg(Color::Yellow))
         }
-        (Some(_), None) => Span::styled(" 已不在索引 ", Style::default().fg(Color::Black).bg(Color::Red)),
-        _ => Span::styled(" 未装 ", Style::default().fg(Color::Black).bg(Color::DarkGray)),
+        (Some(_), None) => Span::styled(" not in index ", Style::default().fg(Color::Black).bg(Color::Red)),
+        _ => Span::styled(" not installed ", Style::default().fg(Color::Black).bg(Color::DarkGray)),
     }
 }
 
@@ -303,14 +304,14 @@ fn draw(f: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
         .split(chunks[1]);
 
-    // 顶栏
+    // header
     let page_badge = match app.page {
         Page::Extensions => Span::styled(
-            " 扩展 ",
+            " Extensions ",
             Style::default().fg(Color::Black).bg(Color::LightCyan),
         ),
         Page::Doctor => Span::styled(
-            " 自检 ",
+            " Doctor ",
             Style::default().fg(Color::Black).bg(Color::LightYellow),
         ),
     };
@@ -325,7 +326,7 @@ fn draw(f: &mut Frame, app: &App) {
         Span::raw(" "),
         page_badge,
         Span::raw(format!(
-            "   {} 个扩展，已装 {}",
+            "   {} extensions, {} installed",
             app.index.extensions.len(),
             app.state.extensions.len()
         )),
@@ -340,7 +341,7 @@ fn draw(f: &mut Frame, app: &App) {
 
     match app.page {
         Page::Extensions => {
-            // 左侧列表
+            // left: list
             let mut items: Vec<ListItem> = Vec::new();
             for (name, ext) in &app.index.extensions {
                 let inst = app.installed_of(name);
@@ -363,12 +364,12 @@ fn draw(f: &mut Frame, app: &App) {
             }
             if items.is_empty() {
                 items.push(ListItem::new(Line::from(Span::styled(
-                    " (索引里没有扩展，按 r 刷新试试)",
+                    " (index is empty - press r to refresh)",
                     Style::default().fg(Color::DarkGray),
                 ))));
             }
             let list = List::new(items)
-                .block(Block::default().borders(Borders::ALL).title(" 扩展 "))
+                .block(Block::default().borders(Borders::ALL).title(" Extensions "))
                 .highlight_style(
                     Style::default()
                         .bg(Color::LightCyan)
@@ -382,7 +383,7 @@ fn draw(f: &mut Frame, app: &App) {
             }
             f.render_stateful_widget(list, body[0], &mut st);
 
-            // 右侧详情
+            // right: details
             let mut lines: Vec<Line> = Vec::new();
             if let Some((name, ext)) = app.selected() {
                 lines.push(Line::from(Span::styled(
@@ -402,13 +403,13 @@ fn draw(f: &mut Frame, app: &App) {
                 }
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![
-                    Span::styled("索引版本 ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("index version ", Style::default().fg(Color::DarkGray)),
                     Span::raw(ext.version.clone()),
                 ]));
                 if let Some(i) = app.installed_of(name) {
                     lines.push(Line::from(vec![
-                        Span::styled("已装版本 ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(format!("{}（{}）", i.version, i.kind)),
+                        Span::styled("installed ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(format!("{} ({})", i.version, i.kind)),
                     ]));
                     lines.push(Line::from(Span::styled(
                         i.exe.clone(),
@@ -417,16 +418,16 @@ fn draw(f: &mut Frame, app: &App) {
                 }
                 let mut kinds = Vec::new();
                 if ext.binary.is_some() {
-                    kinds.push("二进制");
+                    kinds.push("binary");
                 }
                 if ext.source.is_some() {
-                    kinds.push("源码");
+                    kinds.push("source");
                 }
                 if ext.lua.is_some() {
-                    kinds.push("Lua 片段");
+                    kinds.push("lua snippet");
                 }
                 lines.push(Line::from(vec![
-                    Span::styled("可用方式 ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("available as ", Style::default().fg(Color::DarkGray)),
                     Span::raw(kinds.join(" / ")),
                 ]));
                 if !ext.homepage.is_empty() {
@@ -438,7 +439,7 @@ fn draw(f: &mut Frame, app: &App) {
                 if !ext.keys.is_empty() {
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
-                        "键位（装好后自动生效）",
+                        "key bindings (active once installed)",
                         Style::default().fg(Color::DarkGray),
                     )));
                     for k in &ext.keys {
@@ -451,11 +452,11 @@ fn draw(f: &mut Frame, app: &App) {
                     }
                 }
             } else {
-                lines.push(Line::from("(没有选中项)"));
+                lines.push(Line::from("(nothing selected)"));
             }
             f.render_widget(
                 Paragraph::new(lines)
-                    .block(Block::default().borders(Borders::ALL).title(" 详情 "))
+                    .block(Block::default().borders(Borders::ALL).title(" Details "))
                     .wrap(Wrap { trim: false }),
                 body[1],
             );
@@ -473,9 +474,9 @@ fn draw(f: &mut Frame, app: &App) {
                 lines.push(Line::from(Span::styled(l.clone(), style)));
             }
             let title = if app.doctor_problems == 0 {
-                " 自检：一切正常 ".to_string()
+                " Doctor: all good ".to_string()
             } else {
-                format!(" 自检：{} 个问题 ", app.doctor_problems)
+                format!(" Doctor: {} problem(s) ", app.doctor_problems)
             };
             f.render_widget(
                 Paragraph::new(lines)
@@ -486,28 +487,28 @@ fn draw(f: &mut Frame, app: &App) {
         }
     }
 
-    // 底部帮助
+    // footer
     let help = Line::from(vec![
         Span::styled(" Tab ", Style::default().fg(Color::LightCyan)),
-        Span::raw("切页  "),
+        Span::raw("page  "),
         Span::styled("↑↓/jk ", Style::default().fg(Color::LightBlue)),
-        Span::raw("选择  "),
+        Span::raw("select  "),
         Span::styled("Enter ", Style::default().fg(Color::LightBlue)),
-        Span::raw("安装/更新  "),
+        Span::raw("install/update  "),
         Span::styled("b ", Style::default().fg(Color::LightBlue)),
-        Span::raw("源码构建  "),
+        Span::raw("build from source  "),
         Span::styled("d ", Style::default().fg(Color::LightBlue)),
-        Span::raw("卸载  "),
+        Span::raw("remove  "),
         Span::styled("r ", Style::default().fg(Color::LightBlue)),
-        Span::raw("刷新索引  "),
+        Span::raw("refresh index  "),
         Span::styled("u ", Style::default().fg(Color::LightBlue)),
-        Span::raw("自更新  "),
+        Span::raw("self-update  "),
         Span::styled("q ", Style::default().fg(Color::LightBlue)),
-        Span::raw("退出"),
+        Span::raw("quit"),
     ]);
     f.render_widget(Paragraph::new(help), chunks[2]);
 
-    // 第二行：结果提示 或 索引来源
+    // second footer line: last result, or the index source
     let status_area = ratatui::layout::Rect {
         x: chunks[2].x,
         y: chunks[2].y + 1,
@@ -523,14 +524,14 @@ fn draw(f: &mut Frame, app: &App) {
         Line::from(Span::styled(format!(" {}", flash.text), style))
     } else {
         Line::from(Span::styled(
-            format!(" 索引：{}", app.index_src),
+            format!(" index: {}", app.index_src),
             Style::default().fg(Color::DarkGray),
         ))
     };
     f.render_widget(Paragraph::new(text), status_area);
 }
 
-/// 简易按宽度折行（按字符数，不追求完美排版）
+/// Naive width-based wrapping (by chars, wide CJK counts as 2)
 fn textwrap_lines(text: &str, width: usize) -> Vec<String> {
     let width = width.max(10);
     let mut out = Vec::new();
