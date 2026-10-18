@@ -779,6 +779,10 @@ fn main() {
                 1
             }
         },
+        "-V" | "--version" | "version" => {
+            println!("wezext {SELF_VERSION}");
+            0
+        }
         "-h" | "--help" | "help" => {
             println!("{}", HELP);
             0
