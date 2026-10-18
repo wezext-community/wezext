@@ -463,13 +463,37 @@ fn install_lua(ext: &Extension, version: &str) -> Result<Installed, String> {
     })
 }
 
-fn do_install(name: &str, mode: InstallMode, index: &Index, state: &mut State) -> Result<(), String> {
+/// 没显式指定安装方式时：已装的按它原来的方式；没装的优先 binary，其次 lua
+fn mode_for(ext: &Extension, installed: Option<&Installed>) -> InstallMode {
+    if let Some(i) = installed {
+        return match i.kind.as_str() {
+            "lua" => InstallMode::Lua,
+            "source" => InstallMode::Source,
+            _ => InstallMode::Binary,
+        };
+    }
+    if ext.binary.is_some() {
+        InstallMode::Binary
+    } else if ext.lua.is_some() {
+        InstallMode::Lua
+    } else {
+        InstallMode::Source
+    }
+}
+
+fn do_install(
+    name: &str,
+    mode: Option<InstallMode>,
+    index: &Index,
+    state: &mut State,
+) -> Result<(), String> {
     let ext = index
         .extensions
         .get(name)
         .ok_or_else(|| format!("索引里没有扩展 {name}"))?
         .clone();
     let version = ext.version.clone();
+    let mode = mode.unwrap_or_else(|| mode_for(&ext, state.extensions.get(name)));
     let installed = match mode {
         InstallMode::Binary => install_binary(&ext, &version)?,
         InstallMode::Source => install_source(&ext, &version)?,
@@ -531,7 +555,12 @@ fn cmd_list(index: &Index, state: &State, source: &str) {
     }
 }
 
-fn cmd_install(names: &[String], mode: InstallMode, index: &Index, state: &mut State) -> Result<(), String> {
+fn cmd_install(
+    names: &[String],
+    mode: Option<InstallMode>,
+    index: &Index,
+    state: &mut State,
+) -> Result<(), String> {
     if names.is_empty() {
         return Err("用法: wezext install <name>...".into());
     }
@@ -672,11 +701,11 @@ fn main() {
         }
         "install" | "i" => {
             let mode = if build_mode {
-                InstallMode::Source
+                Some(InstallMode::Source)
             } else if lua_mode {
-                InstallMode::Lua
+                Some(InstallMode::Lua)
             } else {
-                InstallMode::Binary
+                None
             };
             match cmd_install(&names, mode, index.as_ref().unwrap(), &mut state) {
                 Ok(()) => 0,
@@ -686,7 +715,7 @@ fn main() {
                 }
             }
         }
-        "build" => match cmd_install(&names, InstallMode::Source, index.as_ref().unwrap(), &mut state) {
+        "build" => match cmd_install(&names, Some(InstallMode::Source), index.as_ref().unwrap(), &mut state) {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("构建失败: {e}");
@@ -710,9 +739,9 @@ fn main() {
                 names.clone()
             };
             let mode = if build_mode {
-                InstallMode::Source
+                Some(InstallMode::Source)
             } else {
-                InstallMode::Binary
+                None
             };
             if targets.is_empty() {
                 println!("没有需要更新的扩展");
