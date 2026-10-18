@@ -24,6 +24,16 @@ $repo = 'wezext-community/wezext'
 $dir = if ($env:WEZEXT_DIR) { $env:WEZEXT_DIR } else { Join-Path $env:LOCALAPPDATA 'wezext\bin' }
 $skipPath = $env:WEZEXT_NO_PATH -in @('1', 'true', 'yes', 'on')
 
+# PowerShell 5.1 某些环境里没有 Get-FileHash，用 .NET 兜底
+function Get-Sha256([string]$path) {
+    $cmd = Get-Command Get-FileHash -ErrorAction SilentlyContinue
+    if ($cmd) { return (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLower() }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $fs = [IO.File]::OpenRead($path)
+    try { $hash = $sha.ComputeHash($fs) } finally { $fs.Dispose(); $sha.Dispose() }
+    return (($hash | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "  ✓ $msg" -ForegroundColor Green }
 function Write-Warn2($msg) { Write-Host "  ! $msg" -ForegroundColor Yellow }
@@ -55,7 +65,7 @@ try {
     $sumText = (Invoke-WebRequest -Uri "$url.sha256" -UseBasicParsing).Content
     if ($sumText -is [byte[]]) { $sumText = [Text.Encoding]::UTF8.GetString($sumText) }
     $expected = ($sumText -split '\s+')[0].Trim().ToLower()
-    $actual = (Get-FileHash -Path $tmp -Algorithm SHA256).Hash.ToLower()
+    $actual = Get-Sha256 $tmp
     if ($expected -and $expected -ne $actual) {
         throw "sha256 不匹配`n  期望 $expected`n  实际 $actual"
     }
