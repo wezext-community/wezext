@@ -223,13 +223,32 @@ fn curl_to(url: &str, dest: &Path) -> Result<(), String> {
 /// 用 Windows 自带的 tar.exe 解压 zip
 fn extract_zip(zip: &Path, dest: &Path) -> Result<(), String> {
     fs::create_dir_all(dest).map_err(|e| format!("创建 {} 失败: {e}", dest.display()))?;
-    run(Command::new("tar.exe").args([
+
+    // 首选 bsdtar；某些工具产出的 zip 它读不了（比如 PowerShell 的 Compress-Archive），
+    // 这时退回 PowerShell 的 Expand-Archive。
+    if run(Command::new("tar.exe").args([
         "-xf",
         &zip.to_string_lossy(),
         "-C",
         &dest.to_string_lossy(),
     ]))
-    .map_err(|e| format!("解压失败: {e}"))
+    .is_ok()
+    {
+        return Ok(());
+    }
+
+    let script = format!(
+        "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+        zip.display(),
+        dest.display()
+    );
+    run(Command::new("powershell.exe").args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        &script,
+    ]))
+    .map_err(|e| format!("解压失败（tar 和 Expand-Archive 都失败）: {e}"))
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
